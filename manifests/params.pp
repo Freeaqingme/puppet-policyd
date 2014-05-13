@@ -15,6 +15,14 @@
 class policyd::params {
 
   ### Application related parameters
+  $db_type        = 'SQLite'
+  $db_name        = 'policyd'
+  $db_host        = 'localhost'
+  $db_username    = 'policyd'
+  $db_password    = fqdn_rand(999991337, $name)
+  $bypass_mode    = 'tempfail'
+  $bypass_timeout = 30
+  $manage_db      = true
 
   $package = $::operatingsystem ? {
     /(?i:FreeBSD)/ => 'mail/policyd2',
@@ -43,14 +51,18 @@ class policyd::params {
     default => 'policyd',
   }
 
+  $process_group = $::operatingsystem ? {
+    default => 'mail',
+  }
+
   $config_dir = $::operatingsystem ? {
-    /(?i:FreeBSD)/ => '/usr/local/etc/cluebringer.d/
-    default        => '/etc/cluebringer.d', # Todo check Debian defaults
+    /(?i:FreeBSD)/ => '/usr/local/etc/cluebringer.d/',
+    default        => '/etc/cluebringer.d' # Todo check Debian defaults
   }
 
   $config_file = $::operatingsystem ? {
-    default => '/opt/static/local_etc/cluebringer.conf',
-    default => '/etc/policyd/policyd.conf', # Todo check Debian defaults
+    /(?i:FreeBSD)/ => '/usr/local/etc//cluebringer.conf',
+    default        => '/etc/policyd/policyd.conf' # Todo check Debian defaults
   }
 
   $config_file_mode = $::operatingsystem ? {
@@ -72,7 +84,8 @@ class policyd::params {
   }
 
   $pid_file = $::operatingsystem ? {
-    default => '/var/run/policyd.pid',
+    /(?i:FreeBSD)/            => '/var/run/cbpolicyd.pid',
+    default                   => '/var/run/policyd.pid' # TODO
   }
 
   $data_dir = $::operatingsystem ? {
@@ -95,7 +108,7 @@ class policyd::params {
   $source = ''
   $source_dir = ''
   $source_dir_purge = false
-  $template = ''
+  $template = 'policyd/cluebringer.conf.erb'
   $options = ''
   $service_autorestart = true
   $version = 'present'

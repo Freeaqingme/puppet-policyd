@@ -2,6 +2,10 @@
 #
 # This is the main policyd class
 #
+# Firewalling support has not yet been implemented as this module will usually
+# run on the same machine as the MTA and not require any firewalling. If this
+# is ever changed, it should probably be done in a way that by default it's
+# disabled, even if the global firewall settings are set to true. I think(?).
 #
 # == Parameters
 #
@@ -12,6 +16,31 @@
 #   Name of a custom class to autoload to manage module's customizations
 #   If defined, policyd class will automatically "include $my_class"
 #   Can be defined also by the (top scope) variable $policyd_myclass
+#
+# [*manage_db*]
+#   To manage or not to manage the database. That's the question.
+#
+# [*db_type*]
+#   Either SQLite, Pg or mysql. Defaults to SQLite.
+#
+# [*db_name*]
+#   Name of the database you'd like to use
+#
+# [*db_host*]
+#   Host of the database you'd like to use
+#
+# [*db_username*]
+#   Username to connect to the database with
+#
+# [*db_password*]
+#   Password to connect to the database with
+#
+# [*bypass_mode*]
+#   Action to take if no connection can be made with the database.
+#   Can be either 'tempfail' or 'pass'.
+#
+# [*bypass_timeout*]
+#   Time to connect to database, in seconds
 #
 # [*source*]
 #   Sets the content of source parameter for main configuration file
@@ -93,27 +122,6 @@
 #   Can be defined also by the (top scope) variables $policyd_puppi_helper
 #   and $puppi_helper
 #
-# [*firewall*]
-#   Set to 'true' to enable firewalling of the services provided by the module
-#   Can be defined also by the (top scope) variables $policyd_firewall
-#   and $firewall
-#
-# [*firewall_tool*]
-#   Define which firewall tool(s) (ad defined in Example42 firewall module)
-#   you want to use to open firewall for policyd port(s)
-#   Can be defined also by the (top scope) variables $policyd_firewall_tool
-#   and $firewall_tool
-#
-# [*firewall_src*]
-#   Define which source ip/net allow for firewalling policyd. Default: 0.0.0.0/0
-#   Can be defined also by the (top scope) variables $policyd_firewall_src
-#   and $firewall_src
-#
-# [*firewall_dst*]
-#   Define which destination ip to use for firewalling. Default: $ipaddress
-#   Can be defined also by the (top scope) variables $policyd_firewall_dst
-#   and $firewall_dst
-#
 # [*debug*]
 #   Set to 'true' to enable modules debugging
 #   Can be defined also by the (top scope) variables $policyd_debug and $debug
@@ -153,7 +161,10 @@
 #   Used only in case the policyd process name is generic (java, ruby...)
 #
 # [*process_user*]
-#   The name of the user policyd runs with. Used by puppi and monitor.
+#   The name of the user policyd runs with.
+#
+# [*process_group*]
+#   The name of the group policyd runs with.
 #
 # [*config_dir*]
 #   Main configuration directory. Used by puppi
@@ -201,6 +212,13 @@
 #
 class policyd (
   $my_class            = params_lookup( 'my_class' ),
+  $db_type             = params_lookup( 'db_type' ),
+  $db_name             = params_lookup( 'db_name' ),
+  $db_host             = params_lookup( 'db_host' ),
+  $db_username         = params_lookup( 'db_username' ),
+  $db_password         = params_lookup( 'db_password' ),
+  $bypass_mode         = params_lookup( 'bypass_mode' ),
+  $bypass_timeout      = params_lookup( 'bypass_timeout' ),
   $source              = params_lookup( 'source' ),
   $source_dir          = params_lookup( 'source_dir' ),
   $source_dir_purge    = params_lookup( 'source_dir_purge' ),
@@ -216,10 +234,6 @@ class policyd (
   $monitor_target      = params_lookup( 'monitor_target' , 'global' ),
   $puppi               = params_lookup( 'puppi' , 'global' ),
   $puppi_helper        = params_lookup( 'puppi_helper' , 'global' ),
-  $firewall            = params_lookup( 'firewall' , 'global' ),
-  $firewall_tool       = params_lookup( 'firewall_tool' , 'global' ),
-  $firewall_src        = params_lookup( 'firewall_src' , 'global' ),
-  $firewall_dst        = params_lookup( 'firewall_dst' , 'global' ),
   $debug               = params_lookup( 'debug' , 'global' ),
   $audit_only          = params_lookup( 'audit_only' , 'global' ),
   $noops               = params_lookup( 'noops' ),
@@ -229,6 +243,7 @@ class policyd (
   $process             = params_lookup( 'process' ),
   $process_args        = params_lookup( 'process_args' ),
   $process_user        = params_lookup( 'process_user' ),
+  $process_group       = params_lookup( 'process_group' ),
   $config_dir          = params_lookup( 'config_dir' ),
   $config_file         = params_lookup( 'config_file' ),
   $config_file_mode    = params_lookup( 'config_file_mode' ),
@@ -250,9 +265,14 @@ class policyd (
   $bool_disableboot=any2bool($disableboot)
   $bool_monitor=any2bool($monitor)
   $bool_puppi=any2bool($puppi)
-  $bool_firewall=any2bool($firewall)
   $bool_debug=any2bool($debug)
   $bool_audit_only=any2bool($audit_only)
+
+  $dsn = $policyd::db_type ? {
+    'SQLite' => "DBI:SQLite:dbname=${db_name}",
+    'Pg'     => "DBI:Pg:database=${db_name};host=${db_host}",
+    'mysql'  => "DBI:mysql:database=${db_name};host=${db_host}"
+  }
 
   ### Definition of some variables used in the module
   $manage_package = $policyd::bool_absent ? {
@@ -297,13 +317,6 @@ class policyd (
     $manage_monitor = true
   }
 
-  if $policyd::bool_absent == true
-  or $policyd::bool_disable == true {
-    $manage_firewall = false
-  } else {
-    $manage_firewall = true
-  }
-
   $manage_audit = $policyd::bool_audit_only ? {
     true  => 'all',
     false => undef,
@@ -322,6 +335,19 @@ class policyd (
   $manage_file_content = $policyd::template ? {
     ''        => undef,
     default   => template($policyd::template),
+  }
+
+  if any2bool($manage_db) {
+    if $db_type == 'mysql' {
+      include ::policyd::mysql
+    } else {
+      fail('$manage_db is currently only supported with Mysql')
+    }
+  }
+
+  user { $policyd::process_user:
+    ensure => present,
+    system => true
   }
 
   ### Managed resources
@@ -414,22 +440,6 @@ class policyd (
         enable   => $policyd::manage_monitor,
         noop     => $policyd::noops,
       }
-    }
-  }
-
-
-  ### Firewall management, if enabled ( firewall => true )
-  if $policyd::bool_firewall == true and $policyd::port != '' {
-    firewall { "policyd_${policyd::protocol}_${policyd::port}":
-      source      => $policyd::firewall_src,
-      destination => $policyd::firewall_dst,
-      protocol    => $policyd::protocol,
-      port        => $policyd::port,
-      action      => 'allow',
-      direction   => 'input',
-      tool        => $policyd::firewall_tool,
-      enable      => $policyd::manage_firewall,
-      noop        => $policyd::noops,
     }
   }
 
