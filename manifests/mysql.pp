@@ -1,6 +1,6 @@
 
 class policyd::mysql (
-  $db_username = $::policyd::db_user,
+  $db_username = $::policyd::db_username,
   $db_password = $::policyd::db_password,
   $db_name     = $::policyd::db_name,
   $db_host     = $::policyd::db_host,
@@ -15,7 +15,6 @@ class policyd::mysql (
   }
 
   exec { 'policyd-mysql':
-    # TODO: Add accounting.tsql ?
     command => "/usr/local/bin/bash -c 'for i in core.tsql access_control.tsql quotas.tsql amavis.tsql checkhelo.tsql checkspf.tsql greylisting.tsql; do /usr/local/bin/bash ./convert-tsql mysql \"\$i\" | sed 's/TYPE=InnoDB/ENGINE=InnoDB/g'; done > policyd.mysql.sql'",
     cwd     => $sql_path,
     creates => "${sql_path}/policyd.mysql.sql"
